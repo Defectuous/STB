@@ -1,0 +1,27 @@
+{
+  "stocks": [
+    "AAPL",
+    "MSFT",
+    "GOOGL",
+    "AMZN",
+    "TSLA",
+    "NVDA",
+    "META"
+  ],
+  "rsi_period": 14,
+  "rsi_timeframe": "1Day",
+  "rsi_lookback_days": 60,
+  "wallet_percentage": 0.75,
+  "chatgpt_model": "gpt-4o",
+  "paper_trading": true,
+  "log_file": "trade_log.json",
+
+  "use_limit_orders": true,
+  "limit_order_offset_pct": 0.005,
+
+  "use_stop_loss": true,
+  "stop_loss_pct": 0.05,
+
+  "use_take_profit": true,
+  "take_profit_pct": 0.50
+}

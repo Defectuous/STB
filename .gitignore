@@ -1,0 +1,8 @@
+.env
+*.log
+daily_trade_state.json
+trade_log.json
+__pycache__/
+*.pyc
+.venv/
+venv/
