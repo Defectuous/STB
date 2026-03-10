@@ -17,6 +17,7 @@ import alpaca_client as alpaca
 from rsi_calculator import calculate_rsi
 from chatgpt_advisor import get_trading_advice
 import trade_state
+import discord_notify
 
 log = logging.getLogger(__name__)
 
@@ -195,6 +196,16 @@ def _handle_buy(
 
         trade_state.record_buy()
         log.info("%s  BUY order submitted: %s", symbol, order.get("id"))
+        discord_notify.notify_buy(
+            symbol=symbol,
+            rsi=rsi,
+            order_type=order_type,
+            notional=spend,
+            order_id=order.get("id", "unknown"),
+            limit_price=limit_price if use_limit_orders and current_price else None,
+            qty=qty if use_limit_orders and current_price else None,
+            paper=paper,
+        )
 
         trade_entry = {
             "timestamp": timestamp,
@@ -311,6 +322,13 @@ def _handle_sell(
         order = alpaca.place_sell_order(symbol, qty=qty, paper=paper)
         trade_state.record_sell()
         log.info("%s  SELL order submitted: %s", symbol, order.get("id"))
+        discord_notify.notify_sell(
+            symbol=symbol,
+            rsi=rsi,
+            qty=qty,
+            order_id=order.get("id", "unknown"),
+            paper=paper,
+        )
         _log_trade(
             {
                 "timestamp": timestamp,
