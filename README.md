@@ -1,6 +1,6 @@
 # STB — Stock Trading Bot
 
-An automated stock trading bot that combines **RSI technical analysis** with **ChatGPT-powered decision making**, executing trades through the **Alpaca Markets API**. The bot only runs during NYSE market hours, including full awareness of holidays and early-close days.
+An automated stock trading bot that combines **RSI technical analysis** with **ChatGPT-powered decision making**, executing trades through the **Alpaca Markets API**. The bot only runs during NYSE market hours, including full awareness of holidays and early-close days, and sends real-time trade alerts to Discord.
 
 ---
 
@@ -13,7 +13,8 @@ Every 60 seconds (while market is open):
     2. Calculate RSI                    (14-period Wilder smoothing)
     3. Ask ChatGPT for a decision       (BUY / SELL / DO NOTHING)
     4. Execute the trade                (Alpaca)
-    5. Log the result                   (trade_log.json)
+    5. Send Discord alert               (BUY and SELL only)
+    6. Log the result                   (trade_log.json)
 ```
 
 **Daily safeguards:**
@@ -29,6 +30,7 @@ Every 60 seconds (while market is open):
 - **ChatGPT Advisor** — Sends RSI + ticker to GPT-4o and receives a strict BUY / SELL / DO NOTHING response
 - **Alpaca Integration** — Supports market orders, limit orders, stop-loss orders, and take-profit orders
 - **NYSE Market Scheduler** — Dynamically computes holidays and early-close days for any year; sleeps precisely until next market open
+- **Discord Notifications** — Sends a rich embed alert to a Discord channel after every BUY and SELL order is submitted; optional, silently disabled if no webhook is configured
 - **Paper Trading Mode** — Toggle live vs. paper trading without touching any code
 - **Persistent Trade State** — Daily buy/sell counts tracked in a local JSON file, auto-reset each day
 - **Full Audit Log** — Every decision and trade appended to `trade_log.json`
@@ -50,11 +52,27 @@ When the market is closed the bot logs the reason and how long until next open, 
 
 ---
 
+## Discord Notifications
+
+After each **BUY** or **SELL** order is submitted, the bot posts a rich embed to your Discord channel:
+
+| Alert | Colour | Includes |
+|---|---|---|
+| 🟢 BUY | Green | Ticker, RSI, order type, spend amount, limit price, qty, order ID, paper/live mode |
+| 🔴 SELL | Red | Ticker, RSI, qty sold, order ID, paper/live mode |
+
+Notifications are **optional** — if `DISCORD_WEBHOOK_URL` is not set in `.env`, they are silently skipped and the bot continues normally.
+
+To enable, create a webhook in Discord (**Channel Settings → Integrations → Webhooks → New Webhook → Copy Webhook URL**) and paste the URL into your `.env`.
+
+---
+
 ## Requirements
 
 - Python 3.11+
 - [Alpaca Markets](https://alpaca.markets) account (free paper trading available)
 - [OpenAI](https://platform.openai.com) API key
+- Discord server with a webhook (optional, for notifications)
 
 ---
 
@@ -84,6 +102,9 @@ cp .env.example .env
 ALPACA_API_KEY=your_alpaca_api_key_here
 ALPACA_SECRET_KEY=your_alpaca_secret_key_here
 OPENAI_API_KEY=your_openai_api_key_here
+
+# Optional — leave blank to disable Discord alerts
+DISCORD_WEBHOOK_URL=your_webhook_url_here
 ```
 
 > **Never commit `.env` to version control.** It is already listed in `.gitignore`.
@@ -100,7 +121,7 @@ OPENAI_API_KEY=your_openai_api_key_here
 | `paper_trading` | `true` | `true` = paper, `false` = live |
 | `log_file` | `"trade_log.json"` | Path to the trade audit log |
 | `use_limit_orders` | `true` | Use limit orders instead of market orders for buys |
-| `limit_order_offset_pct` | `0.005` | Limit price = current price × (1 + offset) |
+| `limit_order_offset_pct` | `0.005` | Limit price = current price × (1 − offset) |
 | `use_stop_loss` | `true` | Attach a stop-loss to every buy order |
 | `stop_loss_pct` | `0.05` | Stop-loss distance below entry price (5%) |
 | `use_take_profit` | `true` | Attach a take-profit to every buy order |
@@ -128,12 +149,13 @@ The bot logs to both **stdout** and `stb.log`.
 
 ```
 STB/
-├── main.py               # Entry point — CLI args, config loading, trading loop
-├── trader.py             # Core trading logic — RSI → ChatGPT → Alpaca
+├── main.py               # Entry point — CLI args, config loading, market-aware trading loop
+├── trader.py             # Core trading logic — RSI → ChatGPT → Alpaca → Discord
 ├── alpaca_client.py      # Alpaca API wrapper (account, positions, orders, history)
 ├── chatgpt_advisor.py    # OpenAI wrapper — returns BUY / SELL / DO NOTHING
 ├── rsi_calculator.py     # RSI calculation (Wilder's smoothing)
 ├── market_schedule.py    # NYSE market hours, holidays, early-close detection
+├── discord_notify.py     # Discord webhook notifications for BUY and SELL orders
 ├── trade_state.py        # Daily trade state persistence (auto-resets at midnight)
 ├── config.json           # Bot configuration
 ├── requirements.txt      # Python dependencies
