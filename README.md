@@ -75,6 +75,43 @@ python main.py --once
 python main.py
 ```
 
+## Running as a systemd service (Linux / Raspberry Pi)
+
+`deploy/stb@.service` is a systemd *template* unit — the instance name after the `@` is the Linux user the bot runs as, and `%h`/`%i` expand to that user's home directory, so the same unit file works for any user without editing it.
+
+Assumes the repo is checked out at `~<user>/STB` with a virtualenv at `~<user>/STB/.venv` (see Setup above, run as that user):
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+cp .env.example .env && $EDITOR .env
+```
+
+Then install and start the service:
+
+```bash
+deploy/install.sh <username>   # e.g. deploy/install.sh defectuous
+```
+
+Or by hand:
+
+```bash
+sudo cp deploy/stb@.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now stb@<username>.service
+```
+
+Useful commands:
+
+```bash
+sudo systemctl status stb@<username>.service
+journalctl -u stb@<username>.service -f     # follow logs (also written to stb.log in the repo dir)
+sudo systemctl stop stb@<username>.service
+sudo systemctl restart stb@<username>.service
+```
+
+The unit restarts the bot on crash (30s backoff) and starts on boot. It runs `main.py` (continuous, market-hours-aware loop) — flip `paper_trading` to `false` in `config.json` only once you've validated behavior in paper mode.
+
 ## Screener
 
 `screener.py` scans Alpaca's tradable US-equity universe (active, marginable, NASDAQ/NYSE/AMEX only — OTC excluded) for stocks whose 20-period SMA is crossing or about to cross above their 50-period SMA, restricted to a $1-$20 price band, >1,000,000 30-day average volume, and price above the 200-period SMA (macro uptrend filter). It shares its crossover math with `strategy/mac_strategy.py` via `strategy/indicators.py`, so "what counts as a cross" is defined once.

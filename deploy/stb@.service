@@ -1,0 +1,23 @@
+[Unit]
+Description=Simple Trading Bot (STB) - %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=%i
+WorkingDirectory=%h/STB
+ExecStart=%h/STB/.venv/bin/python %h/STB/main.py
+Restart=on-failure
+RestartSec=30
+Environment=PYTHONUNBUFFERED=1
+
+# Hardening (safe defaults for a bot that only needs its own dir + network)
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=%h/STB
+
+[Install]
+WantedBy=multi-user.target
