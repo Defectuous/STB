@@ -1,0 +1,17 @@
+{
+  "paper_trading": true,
+  "poll_interval_seconds": 300,
+  "log_file": "stb.log",
+  "state_file": "state.json",
+  "db_file": "stb_data.sqlite3",
+  "strategy": {
+    "name": "mac_strategy",
+    "params": {
+      "symbols": ["SPY"],
+      "fast_period": 20,
+      "slow_period": 50,
+      "max_loss_pct": 0.05,
+      "allocation_pct": 1.00
+    }
+  }
+}

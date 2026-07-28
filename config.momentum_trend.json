@@ -11,18 +11,20 @@
     "max_price": 30.00,
     "min_price": 1.00,
     "min_avg_volume": 1000000,
-    "lookback_days": 120,
+    "lookback_days": 30,
     "exchanges": ["NASDAQ", "NYSE", "AMEX"],
     "marginable_only": true
   },
   "strategy": {
-    "name": "mean_reversion",
+    "name": "momentum_trend",
     "params": {
       "trend_filter_period": 200,
-      "rsi_period": 14,
-      "oversold_threshold": 48.0,
-      "exit_rsi_threshold": 70.0,
-      "take_profit_pct": 0.02,
+      "max_entry_vol_pct": 4.0,
+      "entry_vol_period": 20,
+      "momentum_period": 60,
+      "min_momentum_pct": 20.0,
+      "trailing_period": 20,
+      "trailing_stop_pct": 0.10,
       "max_loss_pct": 0.08
     }
   }

@@ -11,7 +11,7 @@
     "max_price": 30.00,
     "min_price": 1.00,
     "min_avg_volume": 1000000,
-    "lookback_days": 120,
+    "lookback_days": 30,
     "exchanges": ["NASDAQ", "NYSE", "AMEX"],
     "marginable_only": true
   },

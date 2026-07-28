@@ -1,136 +1,75 @@
 """
 main.py
-Entry point for the Stock Trading Bot (STB).
+Entry point for the Simple Trading Bot (STB).
 
 Usage:
-    python main.py
-    python main.py --config path/to/config.json
-
-The bot will:
-  1. Load configuration from config.json (or the path you specify).
-  2. Verify that required environment variables are set (.env file).
-  3. Run the trading loop — evaluating each configured stock,
-     computing RSI, consulting ChatGPT, and executing trades via Alpaca.
+    python main.py --once --dry-run   # test the strategy right now, no orders
+    python main.py --once             # one real evaluation pass (paper by default)
+    python main.py                    # continuous loop, market-hours aware
 """
 
 import argparse
-import json
 import logging
-import os
 import sys
-import time
 from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv()
-
-# ── Logging setup ─────────────────────────────────────────────────────────────
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s  %(levelname)-8s  %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler("stb.log"),
-    ],
-)
-log = logging.getLogger(__name__)
+# Load only this project's .env - dotenv's default search walks up parent
+# directories, which risks silently picking up credentials from an
+# unrelated .env elsewhere on the machine.
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
 
-# ── CLI args ──────────────────────────────────────────────────────────────────
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Stock Trading Bot — RSI + ChatGPT + Alpaca"
-    )
-    parser.add_argument(
-        "--config",
-        default="config.json",
-        help="Path to the JSON config file (default: config.json)",
-    )
+    parser = argparse.ArgumentParser(description="Simple Trading Bot")
+    parser.add_argument("--config", default="config.json", help="Path to config JSON (default: config.json)")
+    parser.add_argument("--once", action="store_true", help="Run a single evaluation pass across all symbols, then exit")
+    parser.add_argument("--dry-run", action="store_true", help="Log signals but never submit orders")
     return parser.parse_args()
 
 
-# ── Config loader ─────────────────────────────────────────────────────────────
-def _load_config(path: str) -> dict:
-    config_path = Path(path)
-    if not config_path.exists():
-        log.error("Config file not found: %s", config_path.resolve())
-        sys.exit(1)
-    with open(config_path, "r") as f:
-        return json.load(f)
-
-
-# ── Env validation ────────────────────────────────────────────────────────────
-def _check_env() -> None:
-    required = ["ALPACA_API_KEY", "ALPACA_SECRET_KEY", "OPENAI_API_KEY"]
-    missing = [k for k in required if not os.getenv(k)]
-    if missing:
-        log.error(
-            "Missing required environment variables: %s\n"
-            "Copy .env.example to .env and fill in your API keys.",
-            ", ".join(missing),
-        )
-        sys.exit(1)
-
-
-# ── Main ──────────────────────────────────────────────────────────────────────
 def main() -> None:
     args = _parse_args()
 
-    log.info("=" * 50)
-    log.info("  Stock Trading Bot (STB) starting")
-    log.info("=" * 50)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s  %(levelname)-8s  %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        handlers=[logging.StreamHandler(sys.stdout)],
+    )
+    log = logging.getLogger(__name__)
 
-    _check_env()
-    config = _load_config(args.config)
+    from config_loader import load_config
+    from engine import TradingEngine
 
-    log.info("Loaded config: %s", args.config)
-    log.info("Stocks to evaluate: %s", config["stocks"])
-    log.info("RSI period: %d  |  Lookback: %d days", config["rsi_period"], config["rsi_lookback_days"])
-    log.info("Wallet spend limit: %.0f%%", config["wallet_percentage"] * 100)
-    log.info("Paper trading: %s", config["paper_trading"])
-    log.info("ChatGPT model: %s", config["chatgpt_model"])
-    log.info("-" * 50)
+    config = load_config(args.config)
 
-    import trader
-    import market_schedule
-
-    loop_seconds = 60
-    run_count = 0
-
-    log.info("Scheduler active — bot will only trade during NYSE market hours.")
-
-    while True:
-        try:
-            if not market_schedule.is_market_open():
-                status = market_schedule.market_status_str()
-                wait_secs = market_schedule.seconds_until_market_open()
-                log.info("Market %s", status)
-                log.info(
-                    "Next open in %.0f s (%.2f h) — sleeping ...",
-                    wait_secs, wait_secs / 3600,
-                )
-                time.sleep(max(wait_secs, 60))  # minimum 60 s to avoid tight spin
-                continue
-
-            run_count += 1
-            log.info("--- Run #%d | Market %s ---", run_count, market_schedule.market_status_str())
-            try:
-                trader.run(config)
-            except Exception as exc:
-                log.error("Unexpected error during trading run: %s", exc, exc_info=True)
-
-            log.info("Sleeping %d s until next run ...", loop_seconds)
-            time.sleep(loop_seconds)
-
-        except KeyboardInterrupt:
-            log.info("Interrupted by user — shutting down.")
-            break
+    # add the file handler now that we know the configured log path
+    file_handler = logging.FileHandler(config.log_file)
+    file_handler.setFormatter(logging.Formatter("%(asctime)s  %(levelname)-8s  %(message)s", "%Y-%m-%d %H:%M:%S"))
+    logging.getLogger().addHandler(file_handler)
 
     log.info("=" * 50)
-    log.info("  STB stopped")
+    log.info("  Simple Trading Bot (STB) starting")
     log.info("=" * 50)
+    if config.universe is not None:
+        log.info(
+            "Strategy: %s | Universe: top %d momentum, <$%.2f, %dd lookback | Paper trading: %s",
+            config.strategy.name, config.universe.top_n, config.universe.max_price,
+            config.universe.lookback_days, config.paper_trading,
+        )
+    else:
+        log.info("Strategy: %s | Symbols: %s | Paper trading: %s", config.strategy.name, config.symbols, config.paper_trading)
+    if args.dry_run:
+        log.info("DRY RUN - no orders will be submitted")
+
+    engine = TradingEngine(config)
+
+    if args.once:
+        engine.run_once(dry_run=args.dry_run)
+    else:
+        engine.run_forever(dry_run=args.dry_run)
 
 
 if __name__ == "__main__":

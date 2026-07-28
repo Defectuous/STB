@@ -1,170 +1,113 @@
-# STB — Stock Trading Bot
+# Simple Trading Bot (STB)
 
-An automated stock trading bot that combines **RSI technical analysis** with **ChatGPT-powered decision making**, executing trades through the **Alpaca Markets API**. The bot only runs during NYSE market hours, including full awareness of holidays and early-close days, and sends real-time trade alerts to Discord.
+A modular Python trading bot built on [alpaca-py](https://github.com/alpacahq/alpaca-py). Strategies are pluggable — each one implements a small interface and gets registered by name in `config.json`. Ships with an initial moving-average-crossover strategy (`strategy/mac_strategy.py`, per `MAC_strat.md`).
 
----
-
-## How It Works
+## How it's organized
 
 ```
-Every 60 seconds (while market is open):
-  For each configured stock:
-    1. Fetch historical closing prices  (Alpaca)
-    2. Calculate RSI                    (14-period Wilder smoothing)
-    3. Ask ChatGPT for a decision       (BUY / SELL / DO NOTHING)
-    4. Execute the trade                (Alpaca)
-    5. Send Discord alert               (BUY and SELL only)
-    6. Log the result                   (trade_log.json)
+STB/
+├── main.py              # CLI entry point — live/paper trading loop
+├── backtest.py           # walk-forward backtest over stored historical bars
+├── screener.py            # scans the tradable universe for SMA crossover setups
+├── engine.py              # orchestrates broker + strategy + storage + scheduler + notifier
+├── config_loader.py       # loads config.json, instantiates the configured strategy
+├── state.py                # tracks last-acted-on bar per symbol (avoids duplicate actions)
+├── broker/
+│   └── alpaca_broker.py   # all Alpaca API calls live here (trading + market data + asset universe)
+├── strategy/
+│   ├── base.py             # Strategy interface (Action, Signal, Strategy ABC)
+│   ├── indicators.py       # shared SMA/crossover math (used by mac_strategy.py and screener.py)
+│   └── mac_strategy.py     # Moving Average Crossover strategy
+├── scheduler/
+│   └── nyse_calendar.py    # NYSE holiday/hours calendar, no API calls needed
+├── notify/
+│   └── discord.py          # optional Discord webhook alerts on BUY/SELL
+├── storage/
+│   └── db.py                # SQLite bar history (accumulates automatically; used for backtesting)
+└── tests/
+    ├── test_mac_strategy.py
+    └── test_screener.py
 ```
 
-**Daily safeguards:**
-- Maximum **1 BUY** per day
-- Maximum **1 SELL** per day — once a sell executes, all further trading stops for the day
-- State resets automatically at midnight
+Every module only depends on the interfaces above it — `engine.py` never imports `alpaca-py` directly, and strategies never import the broker. To add a new strategy: implement `Strategy` in a new file under `strategy/`, then add one line to `strategy/__init__.py`'s `STRATEGY_REGISTRY`.
 
----
-
-## Features
-
-- **RSI Calculation** — Wilder's smoothing method, configurable period and lookback window
-- **ChatGPT Advisor** — Sends RSI + ticker to GPT-4o and receives a strict BUY / SELL / DO NOTHING response
-- **Alpaca Integration** — Supports market orders, limit orders, stop-loss orders, and take-profit orders
-- **NYSE Market Scheduler** — Dynamically computes holidays and early-close days for any year; sleeps precisely until next market open
-- **Discord Notifications** — Sends a rich embed alert to a Discord channel after every BUY and SELL order is submitted; optional, silently disabled if no webhook is configured
-- **Paper Trading Mode** — Toggle live vs. paper trading without touching any code
-- **Persistent Trade State** — Daily buy/sell counts tracked in a local JSON file, auto-reset each day
-- **Full Audit Log** — Every decision and trade appended to `trade_log.json`
-
----
-
-## NYSE Market Schedule
-
-The bot handles all NYSE calendar rules automatically:
-
-| Rule | Detail |
-|---|---|
-| Regular hours | 9:30 AM – 4:00 PM ET, Monday–Friday |
-| Holidays | New Year's Day, MLK Jr. Day, Presidents' Day, Good Friday, Memorial Day, Juneteenth, Independence Day, Labor Day, Thanksgiving, Christmas |
-| Early closes (1:00 PM ET) | Day before Thanksgiving, Christmas Eve, day before July 4 (when applicable) |
-| Weekend observance | Saturday holidays → Friday, Sunday holidays → Monday |
-
-When the market is closed the bot logs the reason and how long until next open, then sleeps exactly that long.
-
----
-
-## Discord Notifications
-
-After each **BUY** or **SELL** order is submitted, the bot posts a rich embed to your Discord channel:
-
-| Alert | Colour | Includes |
-|---|---|---|
-| 🟢 BUY | Green | Ticker, RSI, order type, spend amount, limit price, qty, order ID, paper/live mode |
-| 🔴 SELL | Red | Ticker, RSI, qty sold, order ID, paper/live mode |
-
-Notifications are **optional** — if `DISCORD_WEBHOOK_URL` is not set in `.env`, they are silently skipped and the bot continues normally.
-
-To enable, create a webhook in Discord (**Channel Settings → Integrations → Webhooks → New Webhook → Copy Webhook URL**) and paste the URL into your `.env`.
-
----
-
-## Requirements
-
-- Python 3.11+
-- [Alpaca Markets](https://alpaca.markets) account (free paper trading available)
-- [OpenAI](https://platform.openai.com) API key
-- Discord server with a webhook (optional, for notifications)
-
----
-
-## Installation
+## Setup
 
 ```bash
-git clone https://github.com/Defectuous/STB.git
-cd STB
-python -m venv .venv
-source .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
+cp .env.example .env        # fill in ALPACA_API_KEY / ALPACA_SECRET_KEY
+cp config.example.json config.json   # already done; edit symbols/params as needed
 ```
 
----
+Get free paper-trading API keys at [alpaca.markets](https://alpaca.markets).
 
-## Configuration
+## Testing the strategy
 
-### 1. API Keys
-
-Copy `.env.example` to `.env` and fill in your credentials:
+**1. Unit tests** (fast, no network):
 
 ```bash
-cp .env.example .env
+python -m pytest tests/ -v
 ```
 
-```env
-ALPACA_API_KEY=your_alpaca_api_key_here
-ALPACA_SECRET_KEY=your_alpaca_secret_key_here
-OPENAI_API_KEY=your_openai_api_key_here
+**2. Backtest against historical data** (backfills SQLite from Alpaca automatically, then simulates):
 
-# Optional — leave blank to disable Discord alerts
-DISCORD_WEBHOOK_URL=your_webhook_url_here
+```bash
+python backtest.py --symbol SPY --start 2022-01-01
 ```
 
-> **Never commit `.env` to version control.** It is already listed in `.gitignore`.
+Prints every simulated trade plus strategy return vs. buy-and-hold. Data is cached in `stb_data.sqlite3` so re-runs and future backtests don't re-fetch what's already stored.
 
-### 2. Bot Settings (`config.json`)
+**3. Dry-run against live data** (computes today's signal, places no order):
 
-| Key | Default | Description |
-|---|---|---|
-| `stocks` | `["AAPL","MSFT",...]` | List of tickers to evaluate each run |
-| `rsi_period` | `14` | RSI look-back period |
-| `rsi_lookback_days` | `60` | Days of historical data to fetch |
-| `wallet_percentage` | `0.75` | Fraction of available cash to spend per BUY |
-| `chatgpt_model` | `"gpt-4o"` | OpenAI model to use |
-| `paper_trading` | `true` | `true` = paper, `false` = live |
-| `log_file` | `"trade_log.json"` | Path to the trade audit log |
-| `use_limit_orders` | `true` | Use limit orders instead of market orders for buys |
-| `limit_order_offset_pct` | `0.005` | Limit price = current price × (1 − offset) |
-| `use_stop_loss` | `true` | Attach a stop-loss to every buy order |
-| `stop_loss_pct` | `0.05` | Stop-loss distance below entry price (5%) |
-| `use_take_profit` | `true` | Attach a take-profit to every buy order |
-| `take_profit_pct` | `0.50` | Take-profit distance above entry price (50%) |
+```bash
+python main.py --once --dry-run
+```
 
----
+**4. One real paper-trading pass:**
 
-## Usage
+```bash
+python main.py --once
+```
+
+**5. Continuous, market-hours-aware loop:**
 
 ```bash
 python main.py
 ```
 
-Optional — specify a custom config file:
+## Screener
+
+`screener.py` scans Alpaca's tradable US-equity universe (active, marginable, NASDAQ/NYSE/AMEX only — OTC excluded) for stocks whose 20-period SMA is crossing or about to cross above their 50-period SMA, restricted to a $1-$20 price band, >1,000,000 30-day average volume, and price above the 200-period SMA (macro uptrend filter). It shares its crossover math with `strategy/mac_strategy.py` via `strategy/indicators.py`, so "what counts as a cross" is defined once.
 
 ```bash
-python main.py --config path/to/config.json
+python screener.py                          # full universe, default filters
+python screener.py --limit 300               # quick pass over a subset, for testing
+python screener.py --min-price 2 --max-price 15 --min-volume 2000000
 ```
 
-The bot logs to both **stdout** and `stb.log`.
+Output is a console table with `Status` (`SIGNAL_TRIGGERED` sorted before `WATCHLIST`) and a `Max_Whole_Shares` column sized off a fixed capital base (`--capital`, default $300). Symbols with insufficient history, missing data, or that fail any filter are silently skipped rather than crashing the run. See `python screener.py --help` for every tunable (SMA periods, lookback window, batch size, exchanges).
 
----
+## Configuration (`config.json`)
 
-## Project Structure
+| Key | Default | Description |
+|---|---|---|
+| `paper_trading` | `true` | `true` = paper, `false` = live (flip only when ready) |
+| `poll_interval_seconds` | `300` | How often `main.py`'s continuous loop re-checks while the market is open |
+| `db_file` | `stb_data.sqlite3` | SQLite file where every fetched bar is stored, for backtesting |
+| `state_file` | `state.json` | Per-symbol last-acted-on-bar tracking |
+| `strategy.name` | `mac_strategy` | Must match a key in `strategy.STRATEGY_REGISTRY` |
+| `strategy.params.symbols` | `["SPY"]` | Symbols to trade |
+| `strategy.params.fast_period` | `20` | Fast SMA length |
+| `strategy.params.slow_period` | `50` | Slow SMA length |
+| `strategy.params.max_loss_pct` | `0.05` | Hard stop-loss distance from entry |
+| `strategy.params.allocation_pct` | `1.00` | Fraction of buying power spent per BUY |
 
-```
-STB/
-├── main.py               # Entry point — CLI args, config loading, market-aware trading loop
-├── trader.py             # Core trading logic — RSI → ChatGPT → Alpaca → Discord
-├── alpaca_client.py      # Alpaca API wrapper (account, positions, orders, history)
-├── chatgpt_advisor.py    # OpenAI wrapper — returns BUY / SELL / DO NOTHING
-├── rsi_calculator.py     # RSI calculation (Wilder's smoothing)
-├── market_schedule.py    # NYSE market hours, holidays, early-close detection
-├── discord_notify.py     # Discord webhook notifications for BUY and SELL orders
-├── trade_state.py        # Daily trade state persistence (auto-resets at midnight)
-├── config.json           # Bot configuration
-├── requirements.txt      # Python dependencies
-├── .env.example          # API key template
-└── .gitignore
-```
+Secrets (`ALPACA_API_KEY`, `ALPACA_SECRET_KEY`, optional `DISCORD_WEBHOOK_URL`) live in `.env`, never in `config.json`.
 
----
+## Strategy: Moving Average Crossover
+
+Per `MAC_strat.md`: BUY on a golden cross (fast SMA crosses above slow SMA) when flat; SELL on a death cross (fast SMA crosses below slow SMA) when holding. Every BUY carries a resting stop-loss order `max_loss_pct` below entry, submitted alongside the buy via Alpaca's one-triggers-other (OTO) order class.
 
 ## Disclaimer
 
-This bot is provided for educational and research purposes only. Automated trading carries significant financial risk. Past performance does not guarantee future results. **Use live trading at your own risk.**
+Educational/research use only. Automated trading carries significant financial risk. Use live trading at your own risk.
